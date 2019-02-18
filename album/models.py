@@ -77,6 +77,12 @@ class User(db.Model, UserMixin):
     avatar_s = db.Column(db.String(64))
     avatar_m = db.Column(db.String(64))
     avatar_l = db.Column(db.String(64))
+    avatar_raw = db.Column(db.String(64))
+
+    public_collections = db.Column(db.Boolean, default=True)
+    receive_comment_notification = db.Column(db.Boolean, default=True)
+    receive_follow_notification = db.Column(db.Boolean, default=True)
+    receive_collect_notification = db.Column(db.Boolean, default=True)
 
     confirmed = db.Column(db.Boolean, default=False)
 
@@ -90,6 +96,7 @@ class User(db.Model, UserMixin):
                                 lazy='dynamic', cascade='all')
     followers = db.relationship('Follow', foreign_keys=[Follow.followed_id], back_populates='followed',
                                 lazy='dynamic', cascade='all')
+    notifications = db.relationship('Notification', back_populates='receiver', cascade='all')
 
     def __init__(self, **kwargs):
         super(User, self).__init__(**kwargs)
@@ -239,3 +246,13 @@ def delete_photos(**kwargs):
         path = os.path.join(current_app.config['ALBUMY_UPLOAD_PATH'], filename)
         if os.path.exists(path):  # not every filename map a unique file
             os.remove(path)
+
+
+@db.event.listens_for(User, 'after_delete', named=True)
+def delete_avatars(**kwargs):
+    target = kwargs['target']
+    for filename in [target.avatar_s, target.avatar_m, target.avatar_l, target.avatar_raw]:
+        if filename is not None:  # avatar_raw may be None
+            path = os.path.join(current_app.config['AVATARS_SAVE_PATH'], filename)
+            if os.path.exists(path):  # not every filename map a unique file
+                os.remove(path)

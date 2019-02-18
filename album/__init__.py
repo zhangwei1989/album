@@ -4,12 +4,15 @@ import os
 
 import click
 from flask import Flask, render_template
+from flask_login import current_user
+from flask_wtf.csrf import CSRFError
 
+from album.blueprints.ajax import ajax_bp
 from album.blueprints.auth import auth_bp
 from album.blueprints.main import main_bp
 from album.blueprints.user import user_bp
 from album.extensions import bootstrap, db, login_manager, mail, dropzone, moment, avatars, csrf
-from album.models import Role, User, Permission
+from album.models import Role, User, Permission, Notification
 from album.settings import config
 
 
@@ -46,6 +49,7 @@ def register_blueprints(app):
     app.register_blueprint(main_bp)
     app.register_blueprint(user_bp, url_prefix='/user')
     app.register_blueprint(auth_bp, url_prefix='/auth')
+    app.register_blueprint(ajax_bp, url_prefix='/ajax')
 
 
 def register_shell_context(app):
@@ -55,7 +59,13 @@ def register_shell_context(app):
 
 
 def register_template_context(app):
-    pass
+    @app.context_processor
+    def make_template_context():
+        if current_user.is_authenticated:
+            notification_count = Notification.query.with_parent(current_user).filter_by(is_read=False).count()
+        else:
+            notification_count = None
+        return dict(notification_count=notification_count)
 
 
 def register_errorhandlers(app):

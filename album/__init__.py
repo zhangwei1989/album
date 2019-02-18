@@ -11,7 +11,7 @@ from album.blueprints.ajax import ajax_bp
 from album.blueprints.auth import auth_bp
 from album.blueprints.main import main_bp
 from album.blueprints.user import user_bp
-from album.extensions import bootstrap, db, login_manager, mail, dropzone, moment, avatars, csrf
+from album.extensions import bootstrap, db, whooshee, login_manager, mail, dropzone, moment, avatars, csrf
 from album.models import Role, User, Permission, Notification
 from album.settings import config
 
@@ -40,6 +40,7 @@ def register_extensions(app):
     login_manager.init_app(app)
     mail.init_app(app)
     moment.init_app(app)
+    whooshee.init_app(app)
     dropzone.init_app(app)
     avatars.init_app(app)
     csrf.init_app(app)

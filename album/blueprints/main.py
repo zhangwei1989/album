@@ -4,26 +4,41 @@ import os
 
 from flask import render_template, flash, redirect, url_for, current_app, \
     send_from_directory, request, abort, Blueprint
+from sqlalchemy.sql.expression import func
 from flask_login import login_required, current_user
 
 from album.decorators import confirm_required, permission_required
 from album.extensions import db
 from album.forms.main import DescriptionForm, TagForm, CommentForm
-from album.models import Photo, Tag, Comment, Collect, Notification
+from album.models import Photo, Tag, Comment, Collect, Notification, Follow, User
 from album.notifications import push_comment_notification, push_collect_notification
-from album.utils import rename_image, resize_image, flash_errors
+from album.utils import rename_image, resize_image, flash_errors, redirect_back
 
 main_bp = Blueprint('main', __name__)
 
 
 @main_bp.route('/')
 def index():
-    return render_template('main/index.html')
+    if current_user.is_authenticated:
+        page = request.args.get('page', 1, type=int)
+        per_page = current_app.config['ALBUMY_PHOTO_PER_PAGE']
+        pagination = Photo.query \
+            .join(Follow, Follow.followed_id == Photo.author_id) \
+            .filter(Follow.follower_id == current_user.id) \
+            .order_by(Photo.timestamp.desc()) \
+            .paginate(page, per_page)
+        photos = pagination.items
+    else:
+        pagination = None
+        photos = None
+    tags = Tag.query.join(Tag.photos).group_by(Tag.id).order_by(func.count(Photo.id).desc()).limit(10)
+    return render_template('main/index.html', pagination=pagination, photos=photos, tags=tags, Collect=Collect)
 
 
 @main_bp.route('/explore')
 def explore():
-    return render_template('main/explore.html')
+    photos = Photo.query.order_by(func.random()).limit(12)
+    return render_template('main/explore.html', photos=photos)
 
 
 @main_bp.route('/uploads/<path:filename>')
@@ -56,6 +71,26 @@ def upload():
         db.session.add(photo)
         db.session.commit()
     return render_template('main/upload.html')
+
+
+@main_bp.route('/search')
+def search():
+    q = request.args.get('q', '')
+    if q == '':
+        flash('Enter keyword about photo, user or tag.', 'warning')
+        return redirect_back()
+
+    category = request.args.get('category', 'photo')
+    page = request.args.get('page', 1, type=int)
+    per_page = current_app.config['ALBUMY_SEARCH_RESULT_PER_PAGE']
+    if category == 'user':
+        pagination = User.query.whooshee_search(q).paginate(page, per_page)
+    elif category == 'tag':
+        pagination = Tag.query.whooshee_search(q).paginate(page, per_page)
+    else:
+        pagination = Photo.query.whooshee_search(q).paginate(page, per_page)
+    results = pagination.items
+    return render_template('main/search.html', q=q, results=results, pagination=pagination, category=category)
 
 
 @main_bp.route('/photo/<int:photo_id>')
@@ -280,3 +315,23 @@ def read_all_notification():
     db.session.commit()
     flash('All notifications archived.', 'success')
     return redirect(url_for('.show_notifications'))
+
+
+@main_bp.route('/delete/photo/<int:photo_id>', methods=['POST'])
+@login_required
+def delete_photo(photo_id):
+    photo = Photo.query.get_or_404(photo_id)
+    if current_user != photo.author and not current_user.can('MODERATE'):
+        abort(403)
+
+    db.session.delete(photo)
+    db.session.commit()
+    flash('Photo deleted.', 'info')
+
+    photo_n = Photo.query.with_parent(photo.author).filter(Photo.id < photo_id).order_by(Photo.id.desc()).first()
+    if photo_n is None:
+        photo_p = Photo.query.with_parent(photo.author).filter(Photo.id > photo_id).order_by(Photo.id.asc()).first()
+        if photo_p is None:
+            return redirect(url_for('user.index', username=photo.author.username))
+        return redirect(url_for('.show_photo', photo_id=photo_p.id))
+    return redirect(url_for('.show_photo', photo_id=photo_n.id))
